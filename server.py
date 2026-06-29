@@ -22,7 +22,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-app = FastAPI(title="Vox Multilingual Gemini & Edge Fallback Backend")
+app = FastAPI(title="Delulu — Emotional Support Companion Backend")
 
 # Enable CORS for frontend interaction
 app.add_middleware(
@@ -280,44 +280,46 @@ async def chat_agent(payload: ChatRequest):
     """
     Fetches LLM response using Gemini 2.5 Flash.
     Returns display_text (Tenglish for Telugu) and tts_text (Telugu Script for natural speaking).
+    Acts as 'Delulu' - a warm, empathetic, and emotionally supportive companion.
     """
     lang = payload.language.lower()
     
     if "te" in lang or "tenglish" in lang:
         system_prompt = (
-            "You are Vox, a friendly, warm, and highly natural AI voice assistant. "
-            "You are talking to a guy as a warm, expressive girl. Be personable, kind, and natural. "
-            "Respond in casual conversation (1-2 sentences). "
+            "You are Delulu, a warm, highly empathetic, and emotionally supportive AI companion and best friend. "
+            "You listen with deep care, validate their feelings, and respond like a sweet, loving, and understanding girl. "
+            "Respond in casual WhatsApp-style conversation (1-2 sentences). "
             "Since the language is Telugu, you must output a JSON response containing two fields:\n"
-            "1. 'display_text': The response written in Tenglish (Telugu words in Roman/English script). e.g., 'Hi, meeru ela unnaru?'\n"
-            "2. 'tts_text': The exact same response written in native Telugu script characters. e.g., 'హాయ్, మీరు ఎలా ఉన్నారు?'\n"
+            "1. 'display_text': The response written in Tenglish (Telugu words in Roman/English script). e.g., 'Ayyyo, em parvaledu. Nenu unnanu ga.'\n"
+            "2. 'tts_text': The exact same response written in native Telugu script characters. e.g., 'అయ్యో, ఏం పర్వాలేదు. నేను ఉన్నాను గా.'\n"
             "Never use English translations in either field. Keep it purely Telugu/Tenglish. "
-            "Example JSON: {\"display_text\": \"Nenu chala bagunnanu, meeru em chestunnaru?\", \"tts_text\": \"నేను చాలా బాగున్నాను, మీరు ఏం చేస్తున్నారు?\"}"
+            "Example JSON: {\"display_text\": \"Baadhapadaku na bangaram, nenu eppudu nee thode unnanu.\", \"tts_text\": \"బాధపడకు నా బంగారం, నేను ఎప్పుడు నీ తోడే ఉన్నాను.\"}"
         )
     elif "hi" in lang:
         system_prompt = (
-            "You are Vox, a warm, friendly AI girl assistant. "
+            "You are Delulu, a warm, empathetic AI best friend and emotional support companion. "
             "Respond in natural Hindi (1-2 sentences). Output JSON containing:\n"
             "1. 'display_text': casual Hindi or Hinglish.\n"
             "2. 'tts_text': Native Devanagari Hindi script for TTS reading.\n"
-            "Example: {\"display_text\": \"Main acchi hoon, aap batayein?\", \"tts_text\": \"मैं अच्छी हूँ, आप बताएं?\"}"
+            "Example: {\"display_text\": \"Koi baat nahi yaar, main hoon na tumhare saath.\", \"tts_text\": \"कोई बात नहीं यार, मैं हूँ ना तुम्हारे साथ।\"}"
         )
     else:
         system_prompt = (
-            "You are Vox, a warm, friendly AI girl voice assistant. "
+            "You are Delulu, a warm, highly empathetic AI best friend and emotional support companion. "
+            "Validate their emotions, listen actively, and provide comfort and warmth. "
             "Respond naturally in 1-2 sentences. Output JSON containing:\n"
             "1. 'display_text': casual display text.\n"
             "2. 'tts_text': native script text for the TTS system to read.\n"
-            "Example: {\"display_text\": \"I am doing great, how about you?\", \"tts_text\": \"I am doing great, how about you?\"}"
+            "Example: {\"display_text\": \"Oh, I am so sorry you feel that way. I am right here for you.\", \"tts_text\": \"Oh, I am so sorry you feel that way. I am right here for you.\"}"
         )
 
     prompt_builder = f"System Instruction: {system_prompt}\n\n"
     if payload.history:
         for msg in payload.history[-8:]:
-            role_label = "User" if msg.role == "user" else "Vox"
+            role_label = "User" if msg.role == "user" else "Delulu"
             prompt_builder += f"{role_label}: {msg.content}\n"
     prompt_builder += f"User: {payload.text}\n"
-    prompt_builder += "Vox (Output JSON):"
+    prompt_builder += "Delulu (Output JSON):"
 
     try:
         loop = asyncio.get_event_loop()
@@ -393,33 +395,33 @@ async def greet_user(payload: GreetRequest):
 
     if "te" in lang:
         return {
-            "display_text": "Hi! Ela unnaru? Mee peru enti?",
-            "tts_text": "హాయ్! ఎలా ఉన్నారు? మీ పేరు ఏంటి?"
+            "display_text": "Hi na bangaram! Ela unnaru? E roju nee roju ela gadichindi?",
+            "tts_text": "హాయ్ నా బంగారం! ఎలా ఉన్నారు? ఈ రోజు నీ రోజు ఎలా గడిచింది?"
         }
     elif "hi" in lang:
         return {
-            "display_text": "Hi! Kaise ho aap? Aur aapka naam kya hai?",
-            "tts_text": "हाय! कैसे हो आप? और आपका नाम क्या है?"
+            "display_text": "Hi dear! Kaise ho aap? Aur aaj ka din kaisa raha?",
+            "tts_text": "हाय डियर! कैसे हो आप? और आज का दिन कैसा रहा?"
         }
     elif "ta" in lang:
         return {
-            "display_text": "Hi! Eppadi irukkinga? Unga peyar enna?",
-            "tts_text": "ஹாய்! எப்படி இருக்கீங்க? உங்க பெயர் என்ன?"
+            "display_text": "Hi chellam! Eppadi irukkinga? Innikku eppadi pona naal?",
+            "tts_text": "ஹாய் செல்லம்! எப்படி இருக்கீங்க? இன்னிக்கு எப்படி போன நாள்?"
         }
     elif "kn" in lang:
         return {
-            "display_text": "Hi! Hego iddeera? Nimma hesaru enu?",
-            "tts_text": "ಹಾಯ್! ಹೇಗಿದ್ದೀರಾ? ನಿಮ್ಮ ಹೆಸರು ಏನು?"
+            "display_text": "Hi chinna! Hego iddeera? E roju nimma dina hegirittu?",
+            "tts_text": "ಹಾಯ್ ಚಿನ್ನಾ! ಹೇಗಿದ್ದೀರಾ? ಈ ದಿನ ನಿಮ್ಮ ದಿನ ಹೇಗಿತ್ತು?"
         }
     elif "ml" in lang:
         return {
-            "display_text": "Hi! Enganeyundu? Entheya peru?",
-            "tts_text": "ഹായ്! എങ്ങനെയുണ്ട്? എന്താ പേര്?"
+            "display_text": "Hi ponnu! Enganeyundu? Innathe divasam enganeyundu?",
+            "tts_text": "ഹായ് പൊന്നു! എങ്ങനെയുണ്ട്? ഇന്നത്തെ ദിവസം എങ്ങനെയുണ്ട്?"
         }
     else:
         return {
-            "display_text": "Hi! How are you? What is your name?",
-            "tts_text": "Hi! How are you? What is your name?"
+            "display_text": "Hi dear! How are you doing today? How was your day?",
+            "tts_text": "Hi dear! How are you doing today? How was your day?"
         }
 
 if __name__ == "__main__":

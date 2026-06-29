@@ -1,51 +1,52 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, Square, Trash2, Globe, Volume2 } from 'lucide-react';
+import { Mic, Square, Trash2, Heart, Volume2, ShieldAlert } from 'lucide-react';
 import './App.css';
 
 const BACKEND_URL = 'http://localhost:8000';
 
+// Mapping prebuilt Gemini voices to language-appropriate supportive styles
 const SPEAKERS = {
   te: [
-    { value: 'Aoede', label: 'Lalitha (Expressive Female)' },
-    { value: 'Kore', label: 'Ananya (Soft Female)' },
-    { value: 'Puck', label: 'Prakash (Energetic Male)' },
-    { value: 'Charon', label: 'Kartik (Deep/Warm Male)' },
-    { value: 'Fenrir', label: 'Siddharth (Crisp Male)' }
+    { value: 'Aoede', label: 'Lalitha (Warm Companion)' },
+    { value: 'Kore', label: 'Ananya (Soft Listener)' },
+    { value: 'Puck', label: 'Prakash (Energetic Friend)' },
+    { value: 'Charon', label: 'Kartik (Deep/Comforting)' },
+    { value: 'Fenrir', label: 'Siddharth (Crisp Brother)' }
   ],
   hi: [
-    { value: 'Aoede', label: 'Divya (Expressive Female)' },
-    { value: 'Kore', label: 'Kriti (Soft Female)' },
-    { value: 'Puck', label: 'Rohit (Energetic Male)' },
-    { value: 'Charon', label: 'Aarav (Deep/Warm Male)' },
-    { value: 'Fenrir', label: 'Kabir (Crisp Male)' }
+    { value: 'Aoede', label: 'Divya (Warm Companion)' },
+    { value: 'Kore', label: 'Kriti (Soft Listener)' },
+    { value: 'Puck', label: 'Rohit (Energetic Friend)' },
+    { value: 'Charon', label: 'Aarav (Deep/Comforting)' },
+    { value: 'Fenrir', label: 'Kabir (Crisp Brother)' }
   ],
   en: [
-    { value: 'Aoede', label: 'Mary (Expressive Female)' },
-    { value: 'Kore', label: 'Sarah (Soft Female)' },
-    { value: 'Puck', label: 'James (Energetic Male)' },
-    { value: 'Charon', label: 'David (Deep/Warm Male)' },
-    { value: 'Fenrir', label: 'John (Crisp Male)' }
+    { value: 'Aoede', label: 'Mary (Warm Companion)' },
+    { value: 'Kore', label: 'Sarah (Soft Listener)' },
+    { value: 'Puck', label: 'James (Energetic Friend)' },
+    { value: 'Charon', label: 'David (Deep/Comforting)' },
+    { value: 'Fenrir', label: 'John (Crisp Brother)' }
   ],
   ta: [
-    { value: 'Aoede', label: 'Kavitha (Expressive Female)' },
-    { value: 'Kore', label: 'Meera (Soft Female)' },
-    { value: 'Puck', label: 'Valluvar (Energetic Male)' },
-    { value: 'Charon', label: 'Arjun (Deep/Warm Male)' },
-    { value: 'Fenrir', label: 'Sanjay (Crisp Male)' }
+    { value: 'Aoede', label: 'Kavitha (Warm Companion)' },
+    { value: 'Kore', label: 'Meera (Soft Listener)' },
+    { value: 'Puck', label: 'Valluvar (Energetic Friend)' },
+    { value: 'Charon', label: 'Arjun (Deep/Comforting)' },
+    { value: 'Fenrir', label: 'Sanjay (Crisp Brother)' }
   ],
   kn: [
-    { value: 'Aoede', label: 'Anu (Expressive Female)' },
-    { value: 'Kore', label: 'Aditi (Soft Female)' },
-    { value: 'Puck', label: 'Gagan (Energetic Male)' },
-    { value: 'Charon', label: 'Rohan (Deep/Warm Male)' },
-    { value: 'Fenrir', label: 'Vikram (Crisp Male)' }
+    { value: 'Aoede', label: 'Anu (Warm Companion)' },
+    { value: 'Kore', label: 'Aditi (Soft Listener)' },
+    { value: 'Puck', label: 'Gagan (Energetic Friend)' },
+    { value: 'Charon', label: 'Rohan (Deep/Comforting)' },
+    { value: 'Fenrir', label: 'Vikram (Crisp Brother)' }
   ],
   ml: [
-    { value: 'Aoede', label: 'Sobhana (Expressive Female)' },
-    { value: 'Kore', label: 'Rimi (Soft Female)' },
-    { value: 'Puck', label: 'Midhun (Energetic Male)' },
-    { value: 'Charon', label: 'Rahul (Deep/Warm Male)' },
-    { value: 'Fenrir', label: 'Hari (Crisp Male)' }
+    { value: 'Aoede', label: 'Sobhana (Warm Companion)' },
+    { value: 'Kore', label: 'Rimi (Soft Listener)' },
+    { value: 'Puck', label: 'Midhun (Energetic Friend)' },
+    { value: 'Charon', label: 'Rahul (Deep/Comforting)' },
+    { value: 'Fenrir', label: 'Hari (Crisp Brother)' }
   ]
 };
 
@@ -69,8 +70,6 @@ export default function App() {
   const welcomeAudioDataRef = useRef(null);
   const welcomeSpeechTriggeredRef = useRef(false);
   const chatBottomRef = useRef(null);
-  
-  // Ref to track sequential request IDs and block concurrent race conditions
   const welcomeRequestSeqRef = useRef(0);
 
   const showToast = (message, isError = false) => {
@@ -84,7 +83,6 @@ export default function App() {
     setStatus({ state, text });
   };
 
-  // Sync speakers atomically when language changes
   useEffect(() => {
     const list = SPEAKERS[language] || [];
     if (list.length > 0) {
@@ -95,7 +93,6 @@ export default function App() {
     }
   }, [language]);
 
-  // Key handlers and health checks on load
   useEffect(() => {
     checkConnection();
     
@@ -137,13 +134,11 @@ export default function App() {
     };
   }, []);
 
-  // Update greeting when configuration settles, with debounce protection
   useEffect(() => {
-    // Only run if the check connection sequence has completed at least once
     if (status.state !== 'processing' || messages.length === 0) {
       const timer = setTimeout(() => {
         triggerWelcomeGreeting();
-      }, 150); // Small debounce window to let state settles
+      }, 150);
       return () => clearTimeout(timer);
     }
   }, [language, voice]);
@@ -169,7 +164,6 @@ export default function App() {
   };
 
   const triggerWelcomeGreeting = async () => {
-    // Increment local sequence ID to block concurrent outdated calls
     const currentSeq = ++welcomeRequestSeqRef.current;
     
     welcomeSpeechTriggeredRef.current = false;
@@ -185,16 +179,12 @@ export default function App() {
       });
 
       if (!response.ok) throw new Error();
-      
-      // Discard response if a newer selection occurred
       if (currentSeq !== welcomeRequestSeqRef.current) return;
 
       const data = await response.json();
       setMessages([{ role: 'assistant', text: data.display_text, time: getCurrentTime() }]);
 
       const audioBuffer = await postSpeak(data.tts_text);
-      
-      // Double check sequence again before loading audio
       if (currentSeq !== welcomeRequestSeqRef.current) return;
 
       welcomeAudioDataRef.current = audioBuffer;
@@ -362,7 +352,7 @@ export default function App() {
 
       setMessages(prev => [...prev, { role: 'user', text: transcript, time: getCurrentTime() }]);
 
-      updateStatus('processing', 'Generating AI response...');
+      updateStatus('processing', 'Generating response...');
       const chatRes = await postChat(transcript);
 
       setMessages(prev => [...prev, { role: 'assistant', text: chatRes.display_text, time: getCurrentTime() }]);
@@ -395,7 +385,6 @@ export default function App() {
 
     const data = await res.json();
     
-    // Auto-detect switcher
     if (data.language) {
       const code = data.language.toLowerCase().trim();
       const languageMap = {
@@ -464,24 +453,27 @@ export default function App() {
 
   return (
     <div className="vox-app-container">
+      {/* Background Mesh */}
       <div className="bg-mesh">
         <div className="orb"></div>
         <div className="orb"></div>
       </div>
 
+      {/* Header */}
       <header className="vox-header">
         <div className="logo-row">
-          <div className="logo-badge">🎙️</div>
-          <h1 className="logo-title">Vox</h1>
+          <div className="logo-badge">💖</div>
+          <h1 className="logo-title">Delulu</h1>
         </div>
-        <p className="logo-tagline">Fullstack Multilingual Voice Agent</p>
+        <p className="logo-tagline">Your Emotional Support Companion & Best Friend</p>
       </header>
 
+      {/* Configuration Card */}
       <div className="config-card">
         <div className="config-grid">
           <div className="field-group">
             <label>
-              <Globe className="w-3 h-3" /> Language
+              <Globe className="w-3.5 h-3.5" /> Language
             </label>
             <select
               value={language}
@@ -498,7 +490,7 @@ export default function App() {
           
           <div className="field-group">
             <label>
-              <Volume2 className="w-3 h-3" /> Speaker Voice
+              <Volume2 className="w-3.5 h-3.5" /> Companion Personality
             </label>
             <select
               value={voice}
@@ -514,11 +506,13 @@ export default function App() {
         </div>
       </div>
 
+      {/* Status Connection Indicator */}
       <div className="status-badge">
         <span className={`status-dot ${status.state}`} />
         <span>{status.text}</span>
       </div>
 
+      {/* Interactive visualizer wave */}
       <div className="waveform-box" style={{ opacity: isRecording ? 1 : 0 }}>
         {waveHeights.map((h, i) => (
           <div
@@ -526,24 +520,25 @@ export default function App() {
             className="vis-bar"
             style={{
               height: `${h}px`,
-              background: h > 20 ? '#f43f5e' : h > 10 ? '#6366f1' : '#a855f7'
+              background: h > 20 ? '#f43f5e' : h > 10 ? '#8b5cf6' : '#ec4899'
             }}
           />
         ))}
       </div>
 
+      {/* Conversation Chat panel */}
       <div className="conversation-panel">
         {messages.length === 0 ? (
           <div className="empty-placeholder">
-            <span className="icon">🇮🇳</span>
-            <h3>Vox agent is ready</h3>
-            <p>Click anywhere on screen to enable sound permissions, then hold down the spacebar or mic button to talk.</p>
+            <span className="icon">💖</span>
+            <h3>Delulu is listening</h3>
+            <p>Click anywhere on screen to enable sound permissions, then hold down the spacebar or mic button to talk about your day.</p>
           </div>
         ) : (
           messages.map((msg, i) => (
             <div key={i} className={`msg-bubble ${msg.role === 'user' ? 'user' : 'assistant'}`}>
               <div className="msg-avatar">
-                {msg.role === 'user' ? '👤' : '✨'}
+                {msg.role === 'user' ? '👤' : '💖'}
               </div>
               <div className="msg-text-wrapper">
                 <div className="msg-content">
@@ -559,7 +554,7 @@ export default function App() {
 
         {isProcessing && (
           <div className="msg-bubble assistant">
-            <div className="msg-avatar">✨</div>
+            <div className="msg-avatar">💖</div>
             <div className="msg-content">
               <div className="typing-box">
                 <span style={{ animationDelay: '0s' }} />
@@ -572,6 +567,7 @@ export default function App() {
         <div ref={chatBottomRef} />
       </div>
 
+      {/* Speech mic controls */}
       <div className="controls-panel">
         <div className={`mic-outer ${isRecording ? 'recording' : ''}`}>
           <div className="mic-ring" />
@@ -588,7 +584,7 @@ export default function App() {
         </div>
         
         <span className={`ptt-hint ${isRecording ? 'listening' : ''}`}>
-          {isRecording ? 'Listening...' : 'Hold Mic to Speak (Spacebar)'}
+          {isRecording ? 'Listening to you...' : 'Hold Mic to Speak (Spacebar)'}
         </span>
 
         <div className="btn-row">
@@ -601,6 +597,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* Notifications */}
       <div className={`toast ${toast.show ? 'show' : ''} ${toast.isError ? 'error' : ''}`}>
         {toast.message}
       </div>
