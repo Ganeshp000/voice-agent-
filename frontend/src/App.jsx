@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, Square, Trash2, Download } from 'lucide-react';
+import { Mic, Square, Trash2, Download, Sparkles, User, Paperclip, Send, X, Ear, Calendar, Smile, Volume2, Globe } from 'lucide-react';
 import './App.css';
 
 const BACKEND_URL = 'http://localhost:8000';
@@ -48,7 +48,7 @@ const SPEAKERS = {
     { value: 'Fenrir', label: 'Vikram — Crisp Brother' }
   ],
   ml: [
-    { value: 'Aoede', label: 'Sobhana — Warm Companion' },
+    { value: 'Aoede', label: 'Anjali — Warm Companion' },
     { value: 'Kore', label: 'Rimi — Soft Listener' },
     { value: 'Puck', label: 'Midhun — Energetic Friend' },
     { value: 'Charon', label: 'Rahul — Deep & Comforting' },
@@ -72,6 +72,11 @@ export default function App() {
   const [waveHeights, setWaveHeights] = useState(new Array(40).fill(3));
   const [showCrisisBanner, setShowCrisisBanner] = useState(false);
 
+  // Re-designed view modes: 'home' or 'active'
+  const [viewMode, setViewMode] = useState('home');
+  const [textInput, setTextInput] = useState('');
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'config'
+
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioContextRef = useRef(null);
@@ -83,7 +88,6 @@ export default function App() {
   const welcomeTriggeredRef = useRef(false);
   const chatEndRef = useRef(null);
   const seqRef = useRef(0);
-  // Store all audio buffers for download (in-memory only, clears on refresh)
   const audioBuffersRef = useRef([]);
 
   // --- Helpers ---
@@ -111,13 +115,16 @@ export default function App() {
     checkConnection();
 
     const kd = (e) => {
-      if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'SELECT') {
-        e.preventDefault(); startRecording();
+      if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'SELECT' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        setViewMode('active');
+        startRecording();
       }
     };
     const ku = (e) => {
-      if (e.code === 'Space' && document.activeElement.tagName !== 'SELECT') {
-        e.preventDefault(); stopRecording();
+      if (e.code === 'Space' && document.activeElement.tagName !== 'SELECT' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        stopRecording();
       }
     };
     const bodyClick = async () => {
@@ -150,7 +157,7 @@ export default function App() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isProcessing]);
+  }, [messages, isProcessing, viewMode]);
 
   // --- Connection ---
   const checkConnection = async () => {
@@ -208,8 +215,9 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = new Audio(url);
       activeAudioRef.current = a;
-      a.onended = () => { URL.revokeObjectURL(url); activeAudioRef.current = null; resolve(); };
-      a.onerror = () => { URL.revokeObjectURL(url); activeAudioRef.current = null; reject(); };
+      setStatus({ state: 'speaking', text: 'Speaking…' });
+      a.onended = () => { URL.revokeObjectURL(url); activeAudioRef.current = null; setStatus({ state: 'ready', text: 'Connected' }); resolve(); };
+      a.onerror = () => { URL.revokeObjectURL(url); activeAudioRef.current = null; setStatus({ state: 'ready', text: 'Connected' }); reject(); };
       a.play().catch(reject);
     } catch (e) { reject(e); }
   });
@@ -229,6 +237,7 @@ export default function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       setIsRecording(true);
+      setViewMode('active');
       audioChunksRef.current = [];
 
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -251,7 +260,7 @@ export default function App() {
         await pipeline(blob);
       };
       rec.start(100);
-      setStatus({ state: 'listening', text: 'Listening…' });
+      setStatus({ state: 'listening', text: 'Listening to you…' });
     } catch {
       setIsRecording(false);
       setStatus({ state: 'error', text: 'Mic blocked' });
@@ -288,18 +297,33 @@ export default function App() {
     try {
       const transcript = await fetchTranscribe(blob);
       if (!transcript.trim()) { setStatus({ state: 'ready', text: 'Connected' }); showToast('Could not hear you. Try again.'); setIsProcessing(false); return; }
-      setMessages(p => [...p, { role: 'user', text: transcript, time: now() }]);
+      
+      await handleTextMessage(transcript);
+    } catch (e) {
+      setStatus({ state: 'error', text: 'Error' });
+      showToast(e.message || 'Something went wrong.', true);
+      setIsProcessing(false);
+    }
+  };
 
-      // Check for crisis keywords in user text
-      if (detectCrisisKeywords(transcript)) {
-        setShowCrisisBanner(true);
-      }
+  // --- Text Pipeline ---
+  const handleTextMessage = async (text) => {
+    if (!text.trim()) return;
+    setIsProcessing(true);
+    setViewMode('active');
+    
+    // Add user message locally
+    setMessages(p => [...p, { role: 'user', text: text, time: now() }]);
+    
+    if (detectCrisisKeywords(text)) {
+      setShowCrisisBanner(true);
+    }
 
+    try {
       setStatus({ state: 'processing', text: 'Thinking…' });
-      const chat = await fetchChat(transcript);
+      const chat = await fetchChat(text);
       setMessages(p => [...p, { role: 'assistant', text: chat.display_text, time: now() }]);
 
-      // Check for crisis keywords in AI response too
       if (detectCrisisKeywords(chat.display_text)) {
         setShowCrisisBanner(true);
       }
@@ -312,7 +336,9 @@ export default function App() {
     } catch (e) {
       setStatus({ state: 'error', text: 'Error' });
       showToast(e.message || 'Something went wrong.', true);
-    } finally { setIsProcessing(false); }
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // --- API Calls ---
@@ -358,11 +384,10 @@ export default function App() {
   // --- Download Conversation Audio ---
   const downloadConversation = () => {
     if (audioBuffersRef.current.length === 0) {
-      showToast('No audio to download yet.', true);
+      showToast('No voicemail to download yet.', true);
       return;
     }
 
-    // Combine all audio buffers into a single WAV blob
     const combinedBlob = new Blob(audioBuffersRef.current, { type: 'audio/wav' });
     const url = URL.createObjectURL(combinedBlob);
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -377,28 +402,25 @@ export default function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    showToast('Conversation audio saved!');
+    showToast('Voicemail saved!');
+  };
+
+  // Quick Action Triggers
+  const handleQuickAction = (action) => {
+    if (action === 'voice') {
+      setViewMode('active');
+      startRecording();
+    } else if (action === 'listen') {
+      setViewMode('active');
+      greet();
+    } else if (action === 'checkin') {
+      handleTextMessage('Let us do my daily check-in. Tell me how I can express my day.');
+    }
   };
 
   // --- Render ---
   return (
-    <>
-      {/* ===== Global Nav (Black Bar) ===== */}
-      <nav className="global-nav">
-        <div className="global-nav-inner">
-          <div className="nav-brand">
-            <span className="nav-logo">💖</span>
-            <span className="nav-title">Delulu</span>
-          </div>
-          <div className="nav-actions">
-            <div className="nav-status">
-              <span className={`nav-status-dot ${status.state}`} />
-              <span>{status.text}</span>
-            </div>
-          </div>
-        </div>
-      </nav>
-
+    <div className={`app-container ${viewMode}-view`}>
       {/* ===== Crisis Helpline Banner ===== */}
       {showCrisisBanner && (
         <div className="crisis-banner" id="crisis-helpline-banner">
@@ -413,155 +435,214 @@ export default function App() {
         </div>
       )}
 
-      {/* ===== Sub Nav (Frosted Config Bar) ===== */}
-      <div className="sub-nav">
-        <div className="sub-nav-inner">
-          <div className="sub-nav-left">
-            <span className="sub-nav-category">Companion</span>
-
-            <div className="apple-select-group">
-              <span className="apple-select-label">Language</span>
-              <select className="apple-select" value={language} onChange={e => setLanguage(e.target.value)}>
-                <option value="te">Telugu</option>
-                <option value="hi">Hindi</option>
-                <option value="en">English</option>
-                <option value="ta">Tamil</option>
-                <option value="kn">Kannada</option>
-                <option value="ml">Malayalam</option>
-              </select>
+      {/* ===== SCREEN 1: Home View ===== */}
+      {viewMode === 'home' && (
+        <div className="home-screen">
+          {/* Top Bar */}
+          <header className="home-header">
+            <div className="logo-section">
+              <span className="monogram">DR</span>
+              <span className="app-title">Delulu</span>
             </div>
-          </div>
+            
+            <div className="header-actions">
+              {/* Elegant pill selectors inside config dropdowns */}
+              <div className="config-pills">
+                <select className="pill-select" value={language} onChange={e => setLanguage(e.target.value)}>
+                  <option value="te">Telugu</option>
+                  <option value="hi">Hindi</option>
+                  <option value="en">English</option>
+                  <option value="ta">Tamil</option>
+                  <option value="kn">Kannada</option>
+                  <option value="ml">Malayalam</option>
+                </select>
 
-          <div className="sub-nav-right">
-            <div className="apple-select-group">
-              <span className="apple-select-label">Voice</span>
-              <select className="apple-select" value={voice} onChange={e => setVoice(e.target.value)}>
-                {(SPEAKERS[language] || []).map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
+                <select className="pill-select" value={voice} onChange={e => setVoice(e.target.value)}>
+                  {(SPEAKERS[language] || []).map(s => (
+                    <option key={s.value} value={s.value}>{s.label.split(' — ')[0]}</option>
+                  ))}
+                </select>
+              </div>
+
+              <button className="icon-circle-btn" onClick={() => setActiveTab(activeTab === 'config' ? 'chat' : 'config')} title="Settings">
+                <Sparkles size={18} />
+              </button>
+              
+              <button className="icon-circle-btn" onClick={clearChat} title="Clear Chat">
+                <Trash2 size={18} />
+              </button>
             </div>
-          </div>
+          </header>
+
+          {/* Config Panel (if open) */}
+          {activeTab === 'config' && (
+            <div className="config-drawer glassmorphic">
+              <h3>Preferences</h3>
+              <p>Configure your companion voice parameters and download backups.</p>
+              <div className="drawer-actions">
+                <button className="btn-utility" onClick={downloadConversation}>
+                  <Download size={16} /> Voicemail for Delulu
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Main Hero Title */}
+          <main className="home-main">
+            <div className="welcome-text-container">
+              <h1 className="welcome-title">
+                Hello Friend<br />
+                <span className="welcome-subtitle">Let's talk it out</span>
+              </h1>
+              <p className="welcome-tagline">
+                Share your thoughts, feel heard, and find comfort in conversation.
+              </p>
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div className="quick-actions-row">
+              <button className="pill-action-btn" onClick={() => handleQuickAction('voice')}>
+                <Ear size={18} className="action-icon purple" />
+                <span>Voice notes</span>
+              </button>
+              
+              <button className="pill-action-btn" onClick={() => handleQuickAction('listen')}>
+                <Smile size={18} className="action-icon pink" />
+                <span>Just listen</span>
+              </button>
+              
+              <button className="pill-action-btn" onClick={() => handleQuickAction('checkin')}>
+                <Calendar size={18} className="action-icon blue" />
+                <span>Daily check-in</span>
+              </button>
+            </div>
+          </main>
+
+          {/* Bottom input bar */}
+          <footer className="home-footer-input">
+            <div className="pill-input-wrapper">
+              <button 
+                className={`mic-pill-btn ${isRecording ? 'recording' : ''}`}
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onMouseLeave={stopRecording}
+                onTouchStart={e => { e.preventDefault(); startRecording(); }}
+                onTouchEnd={e => { e.preventDefault(); stopRecording(); }}
+              >
+                <Mic size={20} />
+              </button>
+
+              <input 
+                type="text" 
+                className="pill-text-input" 
+                placeholder="Tap to speak or type..." 
+                value={textInput}
+                onChange={e => setTextInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    handleTextMessage(textInput);
+                    setTextInput('');
+                  }
+                }}
+              />
+
+              <button className="input-action-btn" onClick={downloadConversation} title="Voicemail backup">
+                <Paperclip size={18} />
+              </button>
+            </div>
+          </footer>
         </div>
-      </div>
-
-      {/* ===== Hero Tile (White) ===== */}
-      {messages.length === 0 && !isProcessing && (
-        <section className="hero-tile">
-          <span className="hero-icon">💖</span>
-          <h1 className="hero-headline">Delulu</h1>
-          <p className="hero-tagline">Your emotional support companion. Speak in your language — Delulu listens, understands, and cares.</p>
-          <div className="hero-cta-row">
-            <button className="btn-primary" onClick={() => document.body.click()}>
-              Get Started
-            </button>
-            <button className="btn-secondary-pill" onClick={startRecording}>
-              <Mic style={{ width: 16, height: 16 }} /> Start Talking
-            </button>
-          </div>
-        </section>
       )}
 
-      {/* ===== Conversation Section (Parchment) ===== */}
-      <section className="conversation-section">
-        <div className="conversation-container">
-          <div className="chat-panel">
-            {messages.length === 0 && !isProcessing ? (
-              <div className="empty-state">
-                <span className="empty-state-icon">🫶</span>
-                <h3>Delulu is here for you</h3>
-                <p>Click "Get Started" or hold down the spacebar to share what's on your mind. I'm all ears.</p>
+      {/* ===== SCREEN 2: Active Voice View ===== */}
+      {viewMode === 'active' && (
+        <div className="active-screen">
+          {/* Top close bar */}
+          <header className="active-header">
+            <button className="close-chat-btn" onClick={() => { stopAudio(); stopRecording(); setViewMode('home'); }}>
+              <X size={16} />
+              <span>Close Chat</span>
+            </button>
+          </header>
+
+          {/* Center Orb Visualizer */}
+          <main className="active-main">
+            <div className="orb-container">
+              {/* Outer pulsing glows */}
+              <div className={`orb-glow glow-1 ${status.state}`} />
+              <div className={`orb-glow glow-2 ${status.state}`} />
+              
+              {/* Main animated gradient blob */}
+              <div className={`orb-blob ${status.state}`}>
+                <div className="blob-fluid" />
               </div>
-            ) : (
-              <>
-                {messages.map((msg, i) => (
-                  <div key={i} className={`msg-row ${msg.role}`}>
-                    <div className="msg-avatar">
-                      {msg.role === 'user' ? '👤' : '💖'}
-                    </div>
-                    <div className="msg-body">
-                      <div className="msg-text">{msg.text}</div>
-                      <span className="msg-time">{msg.time}</span>
-                    </div>
-                  </div>
-                ))}
+            </div>
 
-                {isProcessing && (
-                  <div className="msg-row assistant">
-                    <div className="msg-avatar">💖</div>
-                    <div className="msg-body">
-                      <div className="msg-text">
-                        <div className="typing-dots">
-                          <span style={{ animationDelay: '0s' }} />
-                          <span style={{ animationDelay: '0.15s' }} />
-                          <span style={{ animationDelay: '0.3s' }} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
+            {/* Status indicators */}
+            <div className="active-status-container">
+              <h2 className="status-title">
+                {status.state === 'listening' ? 'Listening...' : 
+                 status.state === 'speaking' ? 'Delulu is speaking' : 
+                 status.state === 'processing' ? 'Thinking...' : 
+                 'Delulu is here for you'}
+              </h2>
+              <p className="status-subtitle">
+                {status.state === 'listening' ? 'Release space or button to send' : 
+                 status.state === 'speaking' ? 'Tap Close to go back' : 
+                 'I am listening to your heart'}
+              </p>
+            </div>
+
+            {/* Waveform visualizer (subtle bar display below status) */}
+            <div className="waveform-horizontal" style={{ opacity: isRecording ? 1 : 0 }}>
+              {waveHeights.slice(10, 30).map((h, i) => (
+                <div key={i} className="wave-line" style={{ height: `${h}px` }} />
+              ))}
+            </div>
+
+            {/* Chat Transcript Snippet (last response) */}
+            {messages.length > 0 && (
+              <div className="active-transcript-snippet">
+                <div className="transcript-box">
+                  <p className="transcript-sender">Delulu</p>
+                  <p className="transcript-text">
+                    {messages[messages.length - 1].role === 'assistant' 
+                      ? messages[messages.length - 1].text 
+                      : (messages[messages.length - 2] ? messages[messages.length - 2].text : 'Listening to your voice...')}
+                  </p>
+                </div>
+              </div>
             )}
-            <div ref={chatEndRef} />
-          </div>
+          </main>
+
+          {/* Bottom input bar */}
+          <footer className="active-footer-input">
+            <div className="pill-input-wrapper">
+              <input 
+                type="text" 
+                className="pill-text-input" 
+                placeholder="Write instead..." 
+                value={textInput}
+                onChange={e => setTextInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    handleTextMessage(textInput);
+                    setTextInput('');
+                  }
+                }}
+              />
+              <button className="send-arrow-btn" onClick={() => { handleTextMessage(textInput); setTextInput(''); }}>
+                <Send size={18} />
+              </button>
+            </div>
+          </footer>
         </div>
-      </section>
-
-      {/* ===== Controls Section (Dark Tile) ===== */}
-      <section className="controls-section">
-        {/* Waveform */}
-        <div className="waveform-container" style={{ opacity: isRecording ? 1 : 0 }}>
-          {waveHeights.map((h, i) => (
-            <div key={i} className="wave-bar" style={{ height: `${h}px` }} />
-          ))}
-        </div>
-
-        {/* Mic */}
-        <div className={`mic-wrapper ${isRecording ? 'active' : ''}`}>
-          <div className="mic-ring-pulse" />
-          <button
-            className="mic-button"
-            onMouseDown={startRecording}
-            onMouseUp={stopRecording}
-            onMouseLeave={stopRecording}
-            onTouchStart={e => { e.preventDefault(); startRecording(); }}
-            onTouchEnd={e => { e.preventDefault(); stopRecording(); }}
-          >
-            <Mic />
-          </button>
-        </div>
-
-        <span className={`mic-hint ${isRecording ? 'active' : ''}`}>
-          {isRecording ? 'Listening to you…' : 'Hold to speak · Spacebar'}
-        </span>
-
-        {/* Utility Buttons */}
-        <div className="action-row">
-          <button className="btn-dark-utility" onClick={stopAudio}>
-            <Square /> Stop
-          </button>
-          <button className="btn-dark-utility" onClick={clearChat}>
-            <Trash2 /> Clear
-          </button>
-          <button
-            className="btn-dark-utility btn-download"
-            onClick={downloadConversation}
-            id="download-conversation-btn"
-          >
-            <Download /> Voicemail for Delulu
-          </button>
-        </div>
-      </section>
-
-      {/* ===== Footer ===== */}
-      <footer className="app-footer">
-        <p className="footer-text">Delulu — Emotional Support Companion · Built with Gemini & Edge TTS</p>
-      </footer>
+      )}
 
       {/* ===== Toast ===== */}
       <div className={`toast-notification ${toast.show ? 'visible' : ''} ${toast.isError ? 'error' : ''}`}>
         {toast.message}
       </div>
-    </>
+    </div>
   );
 }
