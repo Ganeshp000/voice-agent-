@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, Square, Trash2, Volume2 } from 'lucide-react';
+import { Mic, Square, Trash2, Download } from 'lucide-react';
 import './App.css';
 
 const BACKEND_URL = 'http://localhost:8000';
+
+// Crisis keywords for frontend detection
+const CRISIS_KEYWORDS = [
+  'suicide', 'end my life', 'kill myself', 'chavali', 'die',
+  'self-harm', 'self harm', 'want to die', 'wanting to die',
+  'hurt myself', 'end it all', 'no reason to live'
+];
 
 const SPEAKERS = {
   te: [
@@ -63,6 +70,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', isError: false });
   const [waveHeights, setWaveHeights] = useState(new Array(40).fill(3));
+  const [showCrisisBanner, setShowCrisisBanner] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -75,6 +83,8 @@ export default function App() {
   const welcomeTriggeredRef = useRef(false);
   const chatEndRef = useRef(null);
   const seqRef = useRef(0);
+  // Store all audio buffers for download (in-memory only, clears on refresh)
+  const audioBuffersRef = useRef([]);
 
   // --- Helpers ---
   const showToast = (message, isError = false) => {
@@ -83,6 +93,11 @@ export default function App() {
   };
 
   const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const detectCrisisKeywords = (text) => {
+    const lower = text.toLowerCase();
+    return CRISIS_KEYWORDS.some(keyword => lower.includes(keyword));
+  };
 
   // --- Effects ---
   useEffect(() => {
@@ -157,6 +172,8 @@ export default function App() {
     welcomeAudioRef.current = null;
     setMessages([]);
     historyRef.current = [];
+    audioBuffersRef.current = [];
+    setShowCrisisBanner(false);
 
     try {
       const r = await fetch(`${BACKEND_URL}/greet`, {
@@ -174,6 +191,7 @@ export default function App() {
       if (seq !== seqRef.current) return;
 
       welcomeAudioRef.current = buf;
+      audioBuffersRef.current.push(buf);
       await playBuffer(buf);
       welcomeTriggeredRef.current = true;
       setStatus({ state: 'ready', text: 'Connected' });
@@ -272,12 +290,23 @@ export default function App() {
       if (!transcript.trim()) { setStatus({ state: 'ready', text: 'Connected' }); showToast('Could not hear you. Try again.'); setIsProcessing(false); return; }
       setMessages(p => [...p, { role: 'user', text: transcript, time: now() }]);
 
+      // Check for crisis keywords in user text
+      if (detectCrisisKeywords(transcript)) {
+        setShowCrisisBanner(true);
+      }
+
       setStatus({ state: 'processing', text: 'Thinking…' });
       const chat = await fetchChat(transcript);
       setMessages(p => [...p, { role: 'assistant', text: chat.display_text, time: now() }]);
 
+      // Check for crisis keywords in AI response too
+      if (detectCrisisKeywords(chat.display_text)) {
+        setShowCrisisBanner(true);
+      }
+
       setStatus({ state: 'speaking', text: 'Speaking…' });
       const buf = await fetchSpeak(chat.tts_text);
+      audioBuffersRef.current.push(buf);
       await playBuffer(buf);
       setStatus({ state: 'ready', text: 'Connected' });
     } catch (e) {
@@ -321,8 +350,34 @@ export default function App() {
   };
 
   const clearChat = () => {
-    setMessages([]); historyRef.current = []; stopAudio();
+    setMessages([]); historyRef.current = []; audioBuffersRef.current = []; stopAudio();
+    setShowCrisisBanner(false);
     showToast('Conversation cleared'); greet();
+  };
+
+  // --- Download Conversation Audio ---
+  const downloadConversation = () => {
+    if (audioBuffersRef.current.length === 0) {
+      showToast('No audio to download yet.', true);
+      return;
+    }
+
+    // Combine all audio buffers into a single WAV blob
+    const combinedBlob = new Blob(audioBuffersRef.current, { type: 'audio/wav' });
+    const url = URL.createObjectURL(combinedBlob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const timeStr = new Date().toLocaleTimeString('en', { hour12: false }).replace(/:/g, '-');
+    const filename = `delulu-voicemail-${dateStr}-${timeStr}.wav`;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast('Conversation audio saved!');
   };
 
   // --- Render ---
@@ -343,6 +398,20 @@ export default function App() {
           </div>
         </div>
       </nav>
+
+      {/* ===== Crisis Helpline Banner ===== */}
+      {showCrisisBanner && (
+        <div className="crisis-banner" id="crisis-helpline-banner">
+          <div className="crisis-banner-inner">
+            <span className="crisis-icon">🆘</span>
+            <div className="crisis-text">
+              <strong>If you or someone you know needs help:</strong>
+              <span className="crisis-number">KIRAN Helpline: <a href="tel:18005990019">1800-599-0019</a> (24/7 Free)</span>
+            </div>
+            <button className="crisis-close" onClick={() => setShowCrisisBanner(false)} aria-label="Close banner">✕</button>
+          </div>
+        </div>
+      )}
 
       {/* ===== Sub Nav (Frosted Config Bar) ===== */}
       <div className="sub-nav">
@@ -474,12 +543,19 @@ export default function App() {
           <button className="btn-dark-utility" onClick={clearChat}>
             <Trash2 /> Clear
           </button>
+          <button
+            className="btn-dark-utility btn-download"
+            onClick={downloadConversation}
+            id="download-conversation-btn"
+          >
+            <Download /> Voicemail for Delulu
+          </button>
         </div>
       </section>
 
       {/* ===== Footer ===== */}
       <footer className="app-footer">
-        <p className="footer-text">Delulu — Multilingual Emotional Support Companion · Built with Gemini & Edge TTS</p>
+        <p className="footer-text">Delulu — Emotional Support Companion · Built with Gemini & Edge TTS</p>
       </footer>
 
       {/* ===== Toast ===== */}

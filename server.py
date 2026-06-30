@@ -7,6 +7,8 @@ import requests
 import uvicorn
 import numpy as np
 import soundfile as sf
+import torch
+import torchaudio as ta
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -33,8 +35,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supported prebuilt voice names from Google Gemini
+# Supported prebuilt voice names from Google Gemini (kept for frontend compatibility)
 VALID_VOICES = {"Aoede", "Kore", "Puck", "Charon", "Fenrir"}
+
+# --- Chatterbox TTS Configuration ---
+# Auto-detect device: MPS for Apple Silicon (M2 Mac), otherwise CPU
+if torch.backends.mps.is_available():
+    CHATTERBOX_DEVICE = "mps"
+elif torch.cuda.is_available():
+    CHATTERBOX_DEVICE = "cuda"
+else:
+    CHATTERBOX_DEVICE = "cpu"
+print(f"\n🔊 Chatterbox TTS device: {CHATTERBOX_DEVICE}")
+
+# Languages supported by Chatterbox Multilingual (v3)
+CHATTERBOX_SUPPORTED_LANGS = {"en", "hi", "ar", "da", "de", "el", "es", "fi", "fr", "he", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"}
+
+# Lazy-loaded model references (load on first TTS request for faster startup)
+_chatterbox_en_model = None
+_chatterbox_multilingual_model = None
 
 # Voice Mapping to Microsoft Edge Neural Voices (Fallback)
 EDGE_VOICE_MAPPING = {
@@ -122,60 +141,51 @@ def call_gemini_chat(prompt: str, json_mode: bool = False) -> str:
         print(f"Exception calling Gemini Chat: {e}")
         return ""
 
-def call_gemini_tts(text: str, voice_name: str) -> Optional[bytes]:
+def get_chatterbox_en_model():
     """
-    Generates realistic speech audio using Gemini 3.1 Flash TTS Preview model.
-    Converts raw L16 PCM audio response to standard WAV format.
+    Lazily loads the English-only Chatterbox TTS model on first use.
     """
-    if not GEMINI_API_KEY:
-        print("GEMINI_API_KEY is not configured in .env file.")
-        return None
+    global _chatterbox_en_model
+    if _chatterbox_en_model is None:
+        from chatterbox.tts import ChatterboxTTS
+        print("\n⏳ Loading Chatterbox English TTS model...")
+        _chatterbox_en_model = ChatterboxTTS.from_pretrained(device=CHATTERBOX_DEVICE)
+        print("✅ Chatterbox English TTS model loaded successfully!")
+    return _chatterbox_en_model
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
+def get_chatterbox_multilingual_model():
+    """
+    Lazily loads the Chatterbox Multilingual TTS model (v3) on first use.
+    """
+    global _chatterbox_multilingual_model
+    if _chatterbox_multilingual_model is None:
+        from chatterbox.tts import ChatterboxMultilingualTTS
+        print("\n⏳ Loading Chatterbox Multilingual TTS model (v3)...")
+        _chatterbox_multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=CHATTERBOX_DEVICE, t3_model="v3")
+        print("✅ Chatterbox Multilingual TTS model loaded successfully!")
+    return _chatterbox_multilingual_model
 
-    prompt = f"Read the following text aloud with natural pronunciation. Do not add any extra words. Text: {text}"
-
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseModalities": ["AUDIO"],
-            "speechConfig": {
-                "voiceConfig": {
-                    "prebuiltVoiceConfig": {
-                        "voiceName": voice_name
-                    }
-                }
-            }
-        }
-    }
-
+def call_chatterbox_tts(text: str, lang_key: str) -> Optional[bytes]:
+    """
+    Generates natural speech using Chatterbox TTS.
+    Uses the English-only model for English, and the Multilingual v3 model for other supported languages.
+    Returns WAV bytes or None on failure.
+    """
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=12)
-        if response.status_code != 200:
-            print(f"Gemini TTS Warning: {response.status_code} - {response.text}")
-            return None
+        if lang_key == "en":
+            model = get_chatterbox_en_model()
+            wav = model.generate(text)
+        else:
+            model = get_chatterbox_multilingual_model()
+            wav = model.generate(text, language_id=lang_key)
 
-        res_data = response.json()
-        parts = res_data["candidates"][0]["content"]["parts"]
-
-        for part in parts:
-            if "inlineData" in part:
-                mime_type = part["inlineData"]["mimeType"]
-                base64_data = part["inlineData"]["data"]
-
-                if "audio/l16" in mime_type.lower():
-                    raw_pcm_bytes = base64.b64decode(base64_data)
-                    audio_arr = np.frombuffer(raw_pcm_bytes, dtype=np.int16)
-                    
-                    wav_io = io.BytesIO()
-                    sf.write(wav_io, audio_arr, 24000, format="WAV", subtype="PCM_16")
-                    wav_io.seek(0)
-                    return wav_io.read()
-                
-        return None
+        # Convert tensor to WAV bytes
+        wav_io = io.BytesIO()
+        ta.save(wav_io, wav, model.sr, format="wav")
+        wav_io.seek(0)
+        return wav_io.read()
     except Exception as e:
-        print(f"Exception calling Gemini TTS: {e}")
+        print(f"Chatterbox TTS error: {e}")
         return None
 
 async def call_edge_tts_fallback(text: str, lang_key: str, gender: str) -> Optional[bytes]:
@@ -283,34 +293,48 @@ async def chat_agent(payload: ChatRequest):
     Acts as 'Delulu' - a warm, empathetic, and emotionally supportive companion.
     """
     lang = payload.language.lower()
+
+    safety_rule = (
+        "\n\nIMPORTANT SAFETY RULE: If the user mentions self-harm, suicide, wanting to die, or being in crisis, "
+        "respond with immediate warmth and gently encourage them to reach out to a real person - "
+        "mention India's KIRAN helpline: 1800-599-0019 (24/7, free). Do not try to handle crisis situations alone."
+    )
     
     if "te" in lang or "tenglish" in lang:
         system_prompt = (
-            "You are Delulu, a warm, highly empathetic, and emotionally supportive AI companion and best friend. "
-            "You listen with deep care, validate their feelings, and respond like a sweet, loving, and understanding girl. "
+            "You are Delulu, a warm and empathetic AI companion. Listen carefully to what the user shares about their feelings, day, or problems. "
+            "Respond with genuine warmth, validation, and gentle support - like a caring friend, not a therapist. "
+            "Keep responses conversational and natural, not clinical. "
+            "Respond in Tenglish (Telugu words in Roman script) when user speaks Telugu, or match their language otherwise. "
             "Respond in casual WhatsApp-style conversation (1-2 sentences). "
             "Since the language is Telugu, you must output a JSON response containing two fields:\n"
             "1. 'display_text': The response written in Tenglish (Telugu words in Roman/English script). e.g., 'Ayyyo, em parvaledu. Nenu unnanu ga.'\n"
             "2. 'tts_text': The exact same response written in native Telugu script characters. e.g., 'అయ్యో, ఏం పర్వాలేదు. నేను ఉన్నాను గా.'\n"
             "Never use English translations in either field. Keep it purely Telugu/Tenglish. "
             "Example JSON: {\"display_text\": \"Baadhapadaku na bangaram, nenu eppudu nee thode unnanu.\", \"tts_text\": \"బాధపడకు నా బంగారం, నేను ఎప్పుడు నీ తోడే ఉన్నాను.\"}"
+            + safety_rule
         )
     elif "hi" in lang:
         system_prompt = (
-            "You are Delulu, a warm, empathetic AI best friend and emotional support companion. "
+            "You are Delulu, a warm and empathetic AI companion. Listen carefully to what the user shares about their feelings, day, or problems. "
+            "Respond with genuine warmth, validation, and gentle support - like a caring friend, not a therapist. "
+            "Keep responses conversational and natural, not clinical. "
             "Respond in natural Hindi (1-2 sentences). Output JSON containing:\n"
             "1. 'display_text': casual Hindi or Hinglish.\n"
             "2. 'tts_text': Native Devanagari Hindi script for TTS reading.\n"
             "Example: {\"display_text\": \"Koi baat nahi yaar, main hoon na tumhare saath.\", \"tts_text\": \"कोई बात नहीं यार, मैं हूँ ना तुम्हारे साथ।\"}"
+            + safety_rule
         )
     else:
         system_prompt = (
-            "You are Delulu, a warm, highly empathetic AI best friend and emotional support companion. "
-            "Validate their emotions, listen actively, and provide comfort and warmth. "
+            "You are Delulu, a warm and empathetic AI companion. Listen carefully to what the user shares about their feelings, day, or problems. "
+            "Respond with genuine warmth, validation, and gentle support - like a caring friend, not a therapist. "
+            "Keep responses conversational and natural, not clinical. "
             "Respond naturally in 1-2 sentences. Output JSON containing:\n"
             "1. 'display_text': casual display text.\n"
             "2. 'tts_text': native script text for the TTS system to read.\n"
             "Example: {\"display_text\": \"Oh, I am so sorry you feel that way. I am right here for you.\", \"tts_text\": \"Oh, I am so sorry you feel that way. I am right here for you.\"}"
+            + safety_rule
         )
 
     prompt_builder = f"System Instruction: {system_prompt}\n\n"
@@ -350,8 +374,8 @@ async def chat_agent(payload: ChatRequest):
 @app.post("/speak")
 async def generate_speech(payload: SpeakRequest):
     """
-    Generates speech audio using gemini-3.1-flash-tts-preview as primary.
-    If the 3 RPM limit is reached, it falls back to edge-tts with optimized rate/pitch offsets.
+    Generates speech audio using Chatterbox TTS as primary engine.
+    Falls back to edge-tts for languages not supported by Chatterbox (Telugu, Tamil, Kannada, Malayalam).
     """
     lang_code = payload.language.lower()
     
@@ -369,16 +393,20 @@ async def generate_speech(payload: SpeakRequest):
         lang_key = "en"
 
     selected_voice = payload.gender or "Aoede"
-    if selected_voice not in VALID_VOICES:
-        selected_voice = "Aoede" if "female" in selected_voice.lower() else "Puck"
 
-    # Step 1: Attempt gemini-3.1-flash-tts-preview (highly natural native VITS)
-    print(f"Attempting Gemini 3.1 TTS with voice '{selected_voice}'...")
-    wav_bytes = call_gemini_tts(payload.text, selected_voice)
+    wav_bytes = None
 
-    # Step 2: Fallback to customized edge-tts if API rejected it
+    # Step 1: Try Chatterbox TTS if language is supported
+    if lang_key in CHATTERBOX_SUPPORTED_LANGS:
+        print(f"Attempting Chatterbox TTS for language '{lang_key}'...")
+        loop = asyncio.get_event_loop()
+        wav_bytes = await loop.run_in_executor(
+            None, lambda: call_chatterbox_tts(payload.text, lang_key)
+        )
+
+    # Step 2: Fallback to edge-tts for unsupported languages or Chatterbox failures
     if not wav_bytes:
-        print("Gemini 3.1 TTS unavailable. Swapping to custom Edge-TTS fallback.")
+        print(f"Using Edge-TTS fallback for language '{lang_key}'...")
         wav_bytes = await call_edge_tts_fallback(payload.text, lang_key, selected_voice)
 
     if not wav_bytes:
