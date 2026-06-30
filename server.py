@@ -207,7 +207,7 @@ async def call_edge_tts_fallback(text: str, lang_key: str, gender: str) -> Optio
     pitch_val = "+8Hz" if mapped_gender == "female" else "+2Hz"
 
     try:
-        communicate = edge_tts.Communicate(text, voice_name, rate=rate_val, pitch=pitch_val)
+        communicate = edge_tts.Communicate(text, voice_name)
         audio_data = io.BytesIO()
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
