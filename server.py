@@ -38,7 +38,7 @@ app.add_middleware(
 # Supported prebuilt voice names from Google Gemini (kept for frontend compatibility)
 VALID_VOICES = {"Aoede", "Kore", "Puck", "Charon", "Fenrir"}
 
-# --- Chatterbox TTS Configuration ---
+# --- Chatterbox & Indic Parler TTS Configuration ---
 # Auto-detect device: MPS for Apple Silicon (M2 Mac), otherwise CPU
 if torch.backends.mps.is_available():
     CHATTERBOX_DEVICE = "mps"
@@ -46,40 +46,53 @@ elif torch.cuda.is_available():
     CHATTERBOX_DEVICE = "cuda"
 else:
     CHATTERBOX_DEVICE = "cpu"
-print(f"\n🔊 Chatterbox TTS device: {CHATTERBOX_DEVICE}")
+print(f"\n🔊 TTS inference device: {CHATTERBOX_DEVICE}")
 
-# Languages supported by Chatterbox Multilingual (v3)
-CHATTERBOX_SUPPORTED_LANGS = {"en", "hi", "ar", "da", "de", "el", "es", "fi", "fr", "he", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"}
+# Languages supported by Chatterbox
+CHATTERBOX_SUPPORTED_LANGS = {"en"}
 
-# Lazy-loaded model references (load on first TTS request for faster startup)
+# Lazy-loaded model references
 _chatterbox_en_model = None
-_chatterbox_multilingual_model = None
+_indic_parler_model = None
+_indic_parler_tokenizer = None
+_indic_parler_description_tokenizer = None
 
-# Voice Mapping to Microsoft Edge Neural Voices (Fallback)
-EDGE_VOICE_MAPPING = {
+# Speaker mappings for ai4bharat/indic-parler-tts
+INDIC_SPEAKERS = {
     "te": {
-        "female": "te-IN-ShrutiNeural",
-        "male": "te-IN-MohanNeural"
+        "aoede": "Lalitha",
+        "kore": "Ananya",
+        "puck": "Prakash",
+        "charon": "Kartik",
+        "fenrir": "Siddharth"
     },
     "hi": {
-        "female": "hi-IN-SwaraNeural",
-        "male": "hi-IN-MadhurNeural"
-    },
-    "en": {
-        "female": "en-IN-NeerjaNeural",
-        "male": "en-IN-PrabhatNeural"
+        "aoede": "Divya",
+        "kore": "Kriti",
+        "puck": "Rohit",
+        "charon": "Aarav",
+        "fenrir": "Kabir"
     },
     "ta": {
-        "female": "ta-IN-PallaviNeural",
-        "male": "ta-IN-ValluvarNeural"
+        "aoede": "Kavitha",
+        "kore": "Meera",
+        "puck": "Valluvar",
+        "charon": "Arjun",
+        "fenrir": "Sanjay"
     },
     "kn": {
-        "female": "kn-IN-SapnaNeural",
-        "male": "kn-IN-GaganNeural"
+        "aoede": "Anu",
+        "kore": "Aditi",
+        "puck": "Gagan",
+        "charon": "Rohan",
+        "fenrir": "Vikram"
     },
     "ml": {
-        "female": "ml-IN-SobhanaNeural",
-        "male": "ml-IN-MidhunNeural"
+        "aoede": "Anjali",
+        "kore": "Rimi",
+        "puck": "Midhun",
+        "charon": "Rahul",
+        "fenrir": "Hari"
     }
 }
 
@@ -153,33 +166,30 @@ def get_chatterbox_en_model():
         print("✅ Chatterbox English TTS model loaded successfully!")
     return _chatterbox_en_model
 
-def get_chatterbox_multilingual_model():
+def get_indic_parler_model_and_tokenizers():
     """
-    Lazily loads the Chatterbox Multilingual TTS model (v3) on first use.
+    Lazily loads the ai4bharat/indic-parler-tts model and tokenizers on first use.
     """
-    global _chatterbox_multilingual_model
-    if _chatterbox_multilingual_model is None:
-        from chatterbox.tts import ChatterboxMultilingualTTS
-        print("\n⏳ Loading Chatterbox Multilingual TTS model (v3)...")
-        _chatterbox_multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=CHATTERBOX_DEVICE, t3_model="v3")
-        print("✅ Chatterbox Multilingual TTS model loaded successfully!")
-    return _chatterbox_multilingual_model
+    global _indic_parler_model, _indic_parler_tokenizer, _indic_parler_description_tokenizer
+    if _indic_parler_model is None:
+        from parler_tts import ParlerTTSForConditionalGeneration
+        from transformers import AutoTokenizer
+        print("\n⏳ Loading ai4bharat/indic-parler-tts model...")
+        model_id = "ai4bharat/indic-parler-tts"
+        _indic_parler_model = ParlerTTSForConditionalGeneration.from_pretrained(model_id).to(CHATTERBOX_DEVICE)
+        _indic_parler_tokenizer = AutoTokenizer.from_pretrained(model_id)
+        _indic_parler_description_tokenizer = AutoTokenizer.from_pretrained(_indic_parler_model.config.text_encoder._name_or_path)
+        print("✅ ai4bharat/indic-parler-tts model loaded successfully!")
+    return _indic_parler_model, _indic_parler_tokenizer, _indic_parler_description_tokenizer
 
-def call_chatterbox_tts(text: str, lang_key: str) -> Optional[bytes]:
+def call_chatterbox_tts(text: str) -> Optional[bytes]:
     """
-    Generates natural speech using Chatterbox TTS.
-    Uses the English-only model for English, and the Multilingual v3 model for other supported languages.
+    Generates natural speech using English-only Chatterbox TTS.
     Returns WAV bytes or None on failure.
     """
     try:
-        if lang_key == "en":
-            model = get_chatterbox_en_model()
-            wav = model.generate(text)
-        else:
-            model = get_chatterbox_multilingual_model()
-            wav = model.generate(text, language_id=lang_key)
-
-        # Convert tensor to WAV bytes
+        model = get_chatterbox_en_model()
+        wav = model.generate(text)
         wav_io = io.BytesIO()
         ta.save(wav_io, wav, model.sr, format="wav")
         wav_io.seek(0)
@@ -188,35 +198,32 @@ def call_chatterbox_tts(text: str, lang_key: str) -> Optional[bytes]:
         print(f"Chatterbox TTS error: {e}")
         return None
 
-async def call_edge_tts_fallback(text: str, lang_key: str, gender: str) -> Optional[bytes]:
+def call_indic_parler_tts(text: str, lang_key: str, speaker_name: str) -> Optional[bytes]:
     """
-    Fallback method: Generates highly natural speech using Microsoft Edge Neural TTS
-    with optimized rate and pitch offsets to eliminate the robotic effect.
+    Generates highly natural speech using ai4bharat/indic-parler-tts.
     """
-    print(f"Falling back to Edge TTS for language '{lang_key}', voice '{gender}'...")
-    
-    mapped_gender = "female"
-    if gender in ["Puck", "Charon", "Fenrir", "male"]:
-        mapped_gender = "male"
-
-    voice_name = EDGE_VOICE_MAPPING.get(lang_key, {}).get(mapped_gender)
-    if not voice_name:
-        voice_name = EDGE_VOICE_MAPPING["en"]["female"]
-
-    rate_val = "-6%" if mapped_gender == "female" else "-8%"
-    pitch_val = "+8Hz" if mapped_gender == "female" else "+2Hz"
-
     try:
-        communicate = edge_tts.Communicate(text, voice_name)
-        audio_data = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_data.write(chunk["data"])
+        model, tokenizer, desc_tokenizer = get_indic_parler_model_and_tokenizers()
         
-        audio_data.seek(0)
-        return audio_data.read()
+        # Build description incorporating the specific speaker's name to set character
+        description = f"{speaker_name}'s voice is clear, with a natural tone and no background noise."
+        
+        input_ids = tokenizer(text, return_tensors="pt").input_ids.to(CHATTERBOX_DEVICE)
+        prompt_input_ids = desc_tokenizer(description, return_tensors="pt").input_ids.to(CHATTERBOX_DEVICE)
+        
+        generation = model.generate(
+            input_ids=input_ids,
+            prompt_input_ids=prompt_input_ids
+        )
+        
+        audio_arr = generation.cpu().numpy().squeeze()
+        
+        wav_io = io.BytesIO()
+        sf.write(wav_io, audio_arr, model.config.sampling_rate, format="WAV", subtype="PCM_16")
+        wav_io.seek(0)
+        return wav_io.read()
     except Exception as e:
-        print(f"Edge TTS fallback failed: {e}")
+        print(f"Indic Parler TTS error: {e}")
         return None
 
 def transliterate_to_tenglish(text: str) -> str:
@@ -374,8 +381,8 @@ async def chat_agent(payload: ChatRequest):
 @app.post("/speak")
 async def generate_speech(payload: SpeakRequest):
     """
-    Generates speech audio using Chatterbox TTS as primary engine.
-    Falls back to edge-tts for languages not supported by Chatterbox (Telugu, Tamil, Kannada, Malayalam).
+    Generates speech audio using Chatterbox TTS for English,
+    and ai4bharat/indic-parler-tts for Indic languages (Telugu, Hindi, Tamil, Kannada, Malayalam).
     """
     lang_code = payload.language.lower()
     
@@ -392,25 +399,34 @@ async def generate_speech(payload: SpeakRequest):
     else:
         lang_key = "en"
 
-    selected_voice = payload.gender or "Aoede"
+    selected_voice = (payload.gender or "Aoede").lower()
 
     wav_bytes = None
+    loop = asyncio.get_event_loop()
 
-    # Step 1: Try Chatterbox TTS if language is supported
-    if lang_key in CHATTERBOX_SUPPORTED_LANGS:
+    # Step 1: English -> Chatterbox TTS
+    if lang_key == "en":
         print(f"Attempting Chatterbox TTS for language '{lang_key}'...")
-        loop = asyncio.get_event_loop()
         wav_bytes = await loop.run_in_executor(
-            None, lambda: call_chatterbox_tts(payload.text, lang_key)
+            None, lambda: call_chatterbox_tts(payload.text)
         )
 
-    # Step 2: Fallback to edge-tts for unsupported languages or Chatterbox failures
-    if not wav_bytes:
-        print(f"Using Edge-TTS fallback for language '{lang_key}'...")
-        wav_bytes = await call_edge_tts_fallback(payload.text, lang_key, selected_voice)
+    # Step 2: Indic Languages -> ai4bharat/indic-parler-tts
+    else:
+        # Get speaker name (fallback to Lalitha for Telugu, Divya for Hindi, etc.)
+        lang_speakers = INDIC_SPEAKERS.get(lang_key, {})
+        speaker_name = lang_speakers.get(selected_voice)
+        if not speaker_name:
+            # Pick first available speaker for this language as fallback
+            speaker_name = list(lang_speakers.values())[0] if lang_speakers else "Lalitha"
+
+        print(f"Attempting Indic Parler TTS for language '{lang_key}' with speaker '{speaker_name}'...")
+        wav_bytes = await loop.run_in_executor(
+            None, lambda: call_indic_parler_tts(payload.text, lang_key, speaker_name)
+        )
 
     if not wav_bytes:
-        raise HTTPException(status_code=500, detail="Speech generation failed on all engines.")
+        raise HTTPException(status_code=500, detail="Speech generation failed.")
 
     return StreamingResponse(io.BytesIO(wav_bytes), media_type="audio/wav")
 
